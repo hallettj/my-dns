@@ -1,93 +1,117 @@
-module Net.DNS () where
+module Net.DNS ( DomainName
+               , Message
+               , Question
+               , ResourceRecord
+               , defaultMessage
+               , RRType(RRType)
+               , RRClass(RRClass)
+               , RROpcode(RROpcode)
+               , RRResponse(RRResponse)
+               , putMessage ) where
 
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as B
 --import Data.ByteString.Parser (getWord16be, Parser)
+import Data.Bits (Bits, shift)
 import Data.Int (Int32)
-import Data.Serialize (decode, encode)
-import Data.Serialize.Put (put, putWord16be)
-import Data.Word (Word16)
+import Data.List (foldl')
+import Data.Serialize (decode, encode, put)
+import Data.Serialize.Put (putWord16be, putWord32be, Put)
+import Data.Word (Word8, Word16, Word32)
+import Foreign.Marshal.Utils (fromBool, toBool)
 
-newtype RRType = RRType String
+type DomainName = String
 
-data Message = Message { getHeader      :: Header
-                       , getQuestions   :: [Question]
-                       , getAnswers     :: [ResourceRecord]
-                       , getAuthorities :: [ResourceRecord]
-                       , getAdditional  :: [ResourceRecord]
-                       }
+data Message = Message { getId                :: Word16
+                       , isResponse           :: Bool
+                       , getMOpcode           :: RROpcode
+                       , isAuthoritative      :: Bool
+                       , isTruncated          :: Bool
+                       , isRecursionDesired   :: Bool
+                       , isRecursionAvailable :: Bool
+                       , getZ                 :: Word8
+                       , getMResponseCode     :: RRResponse
+                       , getQuestions         :: [Question]
+                       , getAnswers           :: [ResourceRecord]
+                       , getAuthorities       :: [ResourceRecord]
+                       , getAdditional        :: [ResourceRecord] }
+               deriving (Eq, Show, Read)
 
-data Header = Header { getId                :: Word16
-                     , isResponse           :: Boolean
-                     , getOpcode            :: Opcode  -- 4 bits
-                     , isAuthoritative      :: Boolean
-                     , isTruncated          :: Boolean
-                     , isRecursionDesired   :: Boolean
-                     , isRecursionAvailable :: Boolean
-                     , getZ                 :: undefined  -- 3 bits, reserved for future use
-                     , getResponseCode      :: ResponseCode  -- 4 bits
-                     , getQDCount           :: Word16
-                     , getANCount           :: Word16
-                     , getNSCount           :: Word16
-                     , getARCount           :: Word16
-                     }
-
-data Question = Question { getName  :: DomainName
-                         , getType  :: Type   -- 16 bits
-                         , getClass :: Class  -- 16 bits
+data Question = Question { getQName :: DomainName
+                         , getQType  :: RRType
+                         , getQClass :: RRClass
                          }
+                deriving (Eq, Show, Read)
 
-data ResourceRecord = ResourceRecord { getName     :: DomainName
-                                     , getType     :: Type   -- 16 bits
-                                     , getClass    :: Class  -- 16 bits
-                                     , getTTL      :: Int32
+data ResourceRecord = ResourceRecord { getRRName   :: DomainName
+                                     , getRRType   :: RRType
+                                     , getRRClass  :: RRClass
+                                     , getTTL      :: Word32
                                      , getRDLength :: Word16
                                      , getRData    :: ByteString
                                      }
+                      deriving (Eq, Show, Read)
 
--- TODO: create newtype for Word16, create values instead of
--- constructors
-data Type = A     -- 1 a host address
-          | NS    -- 2 an authoritative name server
-          | MD    -- 3 a mail destination (Obsolete - use MX)
-          | MF    -- 4 a mail forwarder (Obsolete - use MX)
-          | CNAME -- 5 the canonical name for an alias
-          | SOA   -- 6 marks the start of a zone of authority
-          | MB    -- 7 a mailbox domain name (EXPERIMENTAL)
-          | MG    -- 8 a mail group member (EXPERIMENTAL)
-          | MR    -- 9 a mail rename domain name (EXPERIMENTAL)
-          | NULL  -- 10 a null RR  -- (EXPERIMENTAL)
-          | WKS   -- 11 a well known service description
-          | PTR   -- 12 a domain name pointer
-          | HINFO -- 13 host information
-          | MINFO -- 14 mailbox or mail list information
-          | MX    -- 15 mail exchange
-          | TXT   -- 16 text strings
-          deriving (Eq, Show)
+defaultMessage = Message { getId                = 0
+                         , isResponse           = True
+                         , getMOpcode           = query
+                         , isAuthoritative      = False
+                         , isTruncated          = False
+                         , isRecursionDesired   = False
+                         , isRecursionAvailable = False
+                         , getZ                 = 0
+                         , getMResponseCode     = noError
+                         , getQuestions         = []
+                         , getAnswers           = []
+                         , getAuthorities       = []
+                         , getAdditional        = [] }
 
-data Class = IN -- 1 the Internet
-           | CS -- 2 the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
-           | CH -- 3 the CHAOS class
-           | HS -- 4 Hesiod [Dyer 87]
-           deriving (Eq, Show)
+newtype RRType = RRType { getType :: Word16 } deriving (Eq, Show, Read)
+a        = RRType 1   -- a host address
+ns       = RRType 2   -- an authoritative name server
+md       = RRType 3   -- a mail destination (Obsolete - use MX)
+mf       = RRType 4   -- a mail forwarder (Obsolete - use MX)
+cname    = RRType 5   -- the canonical name for an alias
+soa      = RRType 6   -- marks the start of a zone of authority
+mb       = RRType 7   -- a mailbox domain name (EXPERIMENTAL)
+mg       = RRType 8   -- a mail group member (EXPERIMENTAL)
+mr       = RRType 9   -- a mail rename domain name (EXPERIMENTAL)
+null     = RRType 10  -- a null RR  -- (EXPERIMENTAL)
+wks      = RRType 11  -- a well known service description
+ptr      = RRType 12  -- a domain name pointer
+hinfo    = RRType 13  -- host information
+minfo    = RRType 14  -- mailbox or mail list information
+mx       = RRType 15  -- mail exchange
+txt      = RRType 16  -- text strings
 
-data Opcode = QUERY   -- 0
-            | IQUERY  -- 1
-            | STATUS  -- 2
-            deriving (Eq, Show)
+newtype RRClass = RRClass { getClass :: Word16 } deriving (Eq, Show, Read)
+internet = RRClass 1  -- the Internet
+csnet    = RRClass 2  -- the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
+chaos    = RRClass 3  -- the CHAOS class
+hesiod   = RRClass 4  -- Hesiod [Dyer 87]
 
-data ResponseCode = NoError        -- 0
-                  | FormatError    -- 1
-                  | ServerFailure  -- 2
-                  | NameError      -- 3
-                  | NotImplemented -- 4
-                  | Refused        -- 5
+newtype RROpcode = RROpcode { getOpcode :: Word8 } deriving (Eq, Show, Read)
+query    = RROpcode 0
+iquery   = RROpcode 1
+status   = RROpcode 2
 
+newtype RRResponse = RRResponse { getResponseCode :: Word8 }
+                     deriving (Eq, Show, Read)
+noError        = RRResponse 0
+formatError    = RRResponse 1
+serverFailure  = RRResponse 2
+nameError      = RRResponse 3
+notImplemented = RRResponse 4
+refused        = RRResponse 5
+
+putMessage :: Message -> Put
 putMessage msg = do
     putHeader msg
-    mapM_ putRR (getQuestions msg)
-    mapM_ putRR (getAnswers msg)
-    mapM_ putRR (getAuthorities msg)
-    mapM_ putRR (getAdditional msg)
+    mapM_ putQuestion       (getQuestions   msg)
+    mapM_ putResourceRecord (getAnswers     msg)
+    mapM_ putResourceRecord (getAuthorities msg)
+    mapM_ putResourceRecord (getAdditional  msg)
+
 
 -- The header contains the following fields:
 -- 
@@ -107,67 +131,109 @@ putMessage msg = do
 -- |                    ARCOUNT                    |
 -- +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
+putHeader :: Message -> Put
 putHeader msg = do
     putWord16be (getId msg)
+    putWord16be (flags [
+        (fromIntegral (fromBool        (isResponse           msg)), 1)
+      , (fromIntegral (getOpcode       (getMOpcode           msg)), 4)
+      , (fromIntegral (fromBool        (isAuthoritative      msg)), 1)
+      , (fromIntegral (fromBool        (isTruncated          msg)), 1)
+      , (fromIntegral (fromBool        (isRecursionDesired   msg)), 1)
+      , (fromIntegral (fromBool        (isRecursionAvailable msg)), 1)
+      , (fromIntegral (                (getZ                 msg)), 3)
+      , (fromIntegral (getResponseCode (getMResponseCode     msg)), 4) ])
+    putWord16be (fromIntegral (length (getQuestions   msg)))
+    putWord16be (fromIntegral (length (getAnswers     msg)))
+    putWord16be (fromIntegral (length (getAuthorities msg)))
+    putWord16be (fromIntegral (length (getAdditional  msg)))
 
-    -- flags
-    --put (isResponse msg)
-    --putOpcode -- TODO
-    --put (isAuthoritative msg)
-    --put (isTruncated msg)
-    --put (isRecursionDesired msg)
-    --put (isRecursionAvailable msg)
-    --skip 3  -- TODO
-    --putRcode -- TODO
-
-    let header = getHeader msg
-    put (flags1 header)
-    put (flags2 header)
-
-    putWord16be (length (getQuestions   msg))
-    putWord16be (length (getAnswers     msg))
-    putWord16be (length (getAuthorities msg))
-    putWord16be (length (getAdditional  msg))
-
-flags1 :: Header -> Word8
-flags1 header = let opcode = getOpcode header
-                    shifted = opcode `shiftl` 3
-                    isResp = if (isResponse header) 1 else 0
-                    isAuth = if (isAuthoritative header) 1 else 0
-                    recDes = if (isRecursionDesired header) 1 else 0
-                in shifted + (isResp * 128) + (isAuth * 2) + recDes
-
-flags2 :: Header -> Word8
-flags2 header = let recAv = if (isRecursionAvailable) 1 else 0
-                in (recAv * 128) + (getRcode header)
-
-putRR rr = do
-    put (getName rr)
-    -- TODO
+-- The first value in each tuple is the value of the flag, the second
+-- value is the number of bits used to represent that value.
+flags :: (Bits a) => [(a, Int)] -> a
+flags = foldl' packFlag 0
+    where packFlag packed (v, bits) = (packed `shift` bits) + v
 
 
-parseMessage = do
-    id <- getWord16be
-    isResponse <- getBoolean
-               
+-- The question section is used to carry the "question" in most queries,
+-- i.e., the parameters that define what is being asked.  The section
+-- contains QDCOUNT (usually 1) entries, each of the following format:
+-- 
+--                                     1  1  1  1  1  1
+--       0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+--     |                                               |
+--     /                     QNAME                     /
+--     /                                               /
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+--     |                     QTYPE                     |
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+--     |                     QCLASS                    |
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
-parseMessage :: ByteString -> Either String Message
-parseMessage msg = Message { getHeader = header
-                           , getQuestions = questions
-                           , getAnswers = answers
-                           , getAuthorities = authorities
-                           , getAdditional = additional
-                           }
-    where (header,      afterH)  = parseHeader msg
-          (questions,   afterQD) = parseQuestions (getQDCount header) afterH
-          (answers,     afterAN) = parseRRs (getANCount header) afterQD
-          (authorities, afterNS) = parseRRs (getNSCount header) afterAN
-          (additional,  _)       = parseRRs (getARCount header) afterNS
+putQuestion :: Question -> Put
+putQuestion q = do
+    put           (getQName  q)
+    putWord16be   (getType  (getQType  q))
+    putWord16be   (getClass (getQClass q))
 
-parseHeader :: ByteString -> (Either String Header, ByteString)
-parseHeader msg = do
-    (id, rest) <- decode msg
-    (id, rest) <- parseWord msg
 
-parseWord :: ByteString -> (Either String Word16, ByteString)
-parseWord msg = getWord16be
+-- All RRs have the same top level format shown below:
+-- 
+--                                     1  1  1  1  1  1
+--       0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+--     |                                               |
+--     /                                               /
+--     /                      NAME                     /
+--     |                                               |
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+--     |                      TYPE                     |
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+--     |                     CLASS                     |
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+--     |                      TTL                      |
+--     |                                               |
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+--     |                   RDLENGTH                    |
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--|
+--     /                     RDATA                     /
+--     /                                               /
+--     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+
+putResourceRecord :: ResourceRecord -> Put
+putResourceRecord rr = do
+    put           (getRRName  rr)
+    putWord16be   (getType  (getRRType  rr))
+    putWord16be   (getClass (getRRClass rr))
+    putWord32be   (getTTL   rr)
+    putWord16be   (fromIntegral (B.length (getRData rr)))
+    put           (getRData rr)
+
+
+
+--parseMessage = do
+--    id <- getWord16be
+--    isResponse <- getBool
+--               
+--
+--parseMessage :: ByteString -> Either String Message
+--parseMessage msg = Message { getHeader = header
+--                           , getQuestions = questions
+--                           , getAnswers = answers
+--                           , getAuthorities = authorities
+--                           , getAdditional = additional
+--                           }
+--    where (header,      afterH)  = parseHeader msg
+--          (questions,   afterQD) = parseQuestions (getQDCount header) afterH
+--          (answers,     afterAN) = parseRRs (getANCount header) afterQD
+--          (authorities, afterNS) = parseRRs (getNSCount header) afterAN
+--          (additional,  _)       = parseRRs (getARCount header) afterNS
+--
+--parseHeader :: ByteString -> (Either String Header, ByteString)
+--parseHeader msg = do
+--    (id, rest) <- decode msg
+--    (id, rest) <- parseWord msg
+--
+--parseWord :: ByteString -> (Either String Word16, ByteString)
+--parseWord msg = getWord16be
