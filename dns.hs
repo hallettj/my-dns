@@ -204,12 +204,12 @@ putHeader :: Putter Message
 putHeader msg = do
     putWord16be (getId msg)
     putWord16be (packFlags [
-        (fromIntegral (fromBool         (isResponse           msg)), 1)
+                      (fromBool         (isResponse           msg),  1)
       , (fromIntegral (fromOpcode       (getOpcode            msg)), 4)
-      , (fromIntegral (fromBool         (isAuthoritative      msg)), 1)
-      , (fromIntegral (fromBool         (isTruncated          msg)), 1)
-      , (fromIntegral (fromBool         (isRecursionDesired   msg)), 1)
-      , (fromIntegral (fromBool         (isRecursionAvailable msg)), 1)
+      ,               (fromBool         (isAuthoritative      msg),  1)
+      ,               (fromBool         (isTruncated          msg),  1)
+      ,               (fromBool         (isRecursionDesired   msg),  1)
+      ,               (fromBool         (isRecursionAvailable msg),  1)
       , (fromIntegral (                 getZ                  msg),  3)
       , (fromIntegral (fromResponseCode (getResponseCode      msg)), 4) ])
     putWord16be (fromIntegral (length (getQuestions   msg)))
@@ -224,7 +224,7 @@ packFlags = foldl' packFlag 0
     where packFlag packed (v, size) = (packed `shift` size) + v
 
 unpackFlags :: (Bits a, Bounded a) => [Int] -> a -> [a]
-unpackFlags sizes packed = fst (foldr unpack ([], packed) sizes)
+unpackFlags sizes input = fst (foldr unpack ([], input) sizes)
     where unpack size (vs, packed) = let mask  = complement (maxBound `shift` size)
                                          value = packed .&. mask
                                          rest  = packed `shift` size
