@@ -3,10 +3,10 @@ module Net.DNS ( DomainName
                , Question
                , ResourceRecord
                , defaultMessage
-               , RRType(RRType)
-               , RRClass(RRClass)
-               , Opcode(Opcode)
-               , ResponseCode(ResponseCode)
+               , RRType(..)
+               , RRClass(..)
+               , Opcode(..)
+               , ResponseCode(..)
 
                -- resource record types
                , a
