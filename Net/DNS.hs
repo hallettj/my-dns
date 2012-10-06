@@ -8,6 +8,21 @@ module Net.DNS ( DomainName
                , Opcode(..)
                , ResponseCode(..)
 
+               -- message constructor field names
+               , getId
+               , isResponse
+               , getOpcode
+               , isAuthoritative
+               , isTruncated
+               , isRecursionDesired
+               , isRecursionAvailable
+               , getZ
+               , getResponseCode
+               , getQuestions
+               , getAnswers
+               , getAuthorities
+               , getAdditional
+
                -- resource record types
                , a
                , ns
@@ -48,7 +63,7 @@ module Net.DNS ( DomainName
 import Control.Monad (liftM, replicateM)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
-import Data.Bits ((.&.), Bits, complement, shift)
+import Data.Bits ((.&.), Bits, complement, shiftL, shiftR)
 import Data.List (foldl')
 import Data.Serialize (get, put, Serialize)
 import Data.Serialize.Get (getBytes, getWord16be, getWord32be)
@@ -90,7 +105,7 @@ data ResourceRecord = ResourceRecord { getRRName   :: DomainName
 
 defaultMessage :: Message
 defaultMessage = Message { getId                = 0
-                         , isResponse           = True
+                         , isResponse           = False
                          , getOpcode            = query
                          , isAuthoritative      = False
                          , isTruncated          = False
@@ -221,13 +236,13 @@ putHeader msg = do
 -- value is the number of bits used to represent that value.
 packFlags :: (Bits a) => [(a, Int)] -> a
 packFlags = foldl' packFlag 0
-    where packFlag packed (v, size) = (packed `shift` size) + v
+    where packFlag packed (v, size) = (packed `shiftL` size) + v
 
 unpackFlags :: (Bits a, Bounded a) => [Int] -> a -> [a]
 unpackFlags sizes input = fst (foldr unpack ([], input) sizes)
-    where unpack size (vs, packed) = let mask  = complement (maxBound `shift` size)
+    where unpack size (vs, packed) = let mask  = complement (maxBound `shiftL` size)
                                          value = packed .&. mask
-                                         rest  = packed `shift` size
+                                         rest  = packed `shiftR` size
                                      in (value : vs, rest)
 
 
