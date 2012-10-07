@@ -1,7 +1,9 @@
 module Net.DNS ( DomainName
+               , domainName
+               , fromDomainName
                , Message
-               , Question
-               , ResourceRecord
+               , Question(..)
+               , ResourceRecord(..)
                , defaultMessage
                , RRType(..)
                , RRClass(..)
@@ -22,6 +24,18 @@ module Net.DNS ( DomainName
                , getAnswers
                , getAuthorities
                , getAdditional
+
+               ---- question constructor field names
+               --, getQName
+               --, getQType
+               --, getQClass
+
+               ---- resource record constructor field names
+               --, getRRName
+               --, getRRType
+               --, getRRClass
+               --, getTTL
+               --, getRRData
 
                -- resource record types
                , a
@@ -62,17 +76,26 @@ module Net.DNS ( DomainName
 
 import Control.Monad (liftM, replicateM)
 import Data.ByteString (ByteString)
+import Data.ByteString.UTF8 (fromString, toString)
 import qualified Data.ByteString as B
 import Data.Bits ((.&.), Bits, complement, shiftL, shiftR)
-import Data.List (foldl')
+import Data.List (foldl', intercalate, null)
+import Data.List.Split (splitOn)
 import Data.Serialize (get, put, Serialize)
-import Data.Serialize.Get (getBytes, getWord16be, getWord32be)
-import Data.Serialize.Put (putWord16be, putWord32be, Putter)
+import Data.Serialize.Get (getBytes, getWord8, getWord16be, getWord32be)
+import Data.Serialize.Put (putByteString, putWord8, putWord16be, putWord32be, Putter)
 import Data.Word (Word8, Word16, Word32)
 import Foreign.Marshal.Utils (fromBool, toBool)
 import Prelude hiding (null)
 
-type DomainName = String
+newtype DomainName = DomainName [String] deriving (Eq, Show, Read)
+
+domainName :: String -> DomainName
+domainName = DomainName . labels
+    where labels = filter (not . null) . splitOn "."
+
+fromDomainName :: DomainName -> String
+fromDomainName (DomainName n) = intercalate "." n ++ "."
 
 data Message = Message { getId                :: Word16
                        , isResponse           :: Bool
@@ -99,7 +122,7 @@ data ResourceRecord = ResourceRecord { getRRName   :: DomainName
                                      , getRRType   :: RRType
                                      , getRRClass  :: RRClass
                                      , getTTL      :: Word32
-                                     , getRData    :: ByteString
+                                     , getRRData   :: ByteString
                                      }
                       deriving (Eq, Show, Read)
 
@@ -128,7 +151,7 @@ soa      = RRType 6   -- marks the start of a zone of authority
 mb       = RRType 7   -- a mailbox domain name (EXPERIMENTAL)
 mg       = RRType 8   -- a mail group member (EXPERIMENTAL)
 mr       = RRType 9   -- a mail rename domain name (EXPERIMENTAL)
-null     = RRType 10  -- a null RR  -- (EXPERIMENTAL)
+nullRR   = RRType 10  -- a null RR  -- (EXPERIMENTAL)
 wks      = RRType 11  -- a well known service description
 ptr      = RRType 12  -- a domain name pointer
 hinfo    = RRType 13  -- host information
@@ -305,8 +328,8 @@ instance Serialize ResourceRecord where
         putWord16be   (fromRRType  (getRRType  rr))
         putWord16be   (fromRRClass (getRRClass rr))
         putWord32be   (getTTL   rr)
-        putWord16be   (fromIntegral (B.length (getRData rr)))
-        put           (getRData rr)
+        putWord16be   (fromIntegral (B.length (getRRData rr)))
+        putByteString (getRRData rr)
 
     get = do
         name  <- get
@@ -319,4 +342,31 @@ instance Serialize ResourceRecord where
                               , getRRType  = t
                               , getRRClass = c
                               , getTTL     = fromIntegral ttl
-                              , getRData   = rdata }
+                              , getRRData  = rdata }
+
+-- name limits:
+-- * labels are 63 octects or fewer
+-- * names are 255 octets or fewer, including dots, including final dot
+instance Serialize DomainName where
+    put (DomainName labels) = do
+        mapM_ putLabel labels
+        putWord8 0
+      where
+        putLabel l = do
+            let bytes = fromString l
+            putWord8 (fromIntegral (B.length bytes))
+            putByteString bytes
+
+    get = do
+        labels <- getLabels
+        return $ DomainName labels
+      where
+        getLabels = do
+          len <- liftM fromIntegral getWord8
+          if len == 0
+          then return []
+          else do
+              bytes <- getBytes len
+              let label = toString bytes
+              rest <- getLabels
+              return (label : rest)
