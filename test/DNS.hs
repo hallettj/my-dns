@@ -1,6 +1,8 @@
 module DNSTest (main) where
 
-import Control.Monad (liftM)
+import Control.Monad (liftM, replicateM)
+import qualified Data.ByteString      as BS
+import qualified Data.ByteString.UTF8 as UTF8
 import Data.List (intercalate)
 import Data.Serialize (decode, encode)
 import Data.Word (Word32)
@@ -24,9 +26,20 @@ main = quickCheckWith stdArgs propSurvivesSerialization
 -- * UDP messages are 512 octets or fewer
 instance Arbitrary DomainName where
     arbitrary = do
-        labels <- listOf arbitraryLabel `suchThat` ((<= 255) . sum . map length)
+        num    <- (arbitrary :: Gen Word32) `suchThat` (> 0)
+        labels <- buildLabels num []
         return $ domainName (intercalate "." labels)
-      where arbitraryLabel = arbitrary `suchThat` ((<= 64) . length)
+      where buildLabels n ls = do
+                label <- buildLabel
+                if totalLen (label : ls) > 255
+                then return ls
+                else buildLabels (n - 1) (label : ls)
+            buildLabel = do
+                l <- choose (0, 63)
+                -- TODO: replicateM l arbitrary `suchThat` ((<= 63) . len)
+                replicateM l arbitrary
+            totalLen ls = sum (map len ls) + length ls
+            len = BS.length . UTF8.fromString
 
 instance Arbitrary Message where
     arbitrary = do

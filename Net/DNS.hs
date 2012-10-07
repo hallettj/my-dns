@@ -76,8 +76,8 @@ module Net.DNS ( DomainName
 
 import Control.Monad (liftM, replicateM)
 import Data.ByteString (ByteString)
-import Data.ByteString.UTF8 (fromString, toString)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.UTF8 as UTF8
 import Data.Bits ((.&.), Bits, complement, shiftL, shiftR)
 import Data.List (foldl', intercalate, null)
 import Data.List.Split (splitOn)
@@ -344,16 +344,16 @@ instance Serialize ResourceRecord where
                               , getTTL     = fromIntegral ttl
                               , getRRData  = rdata }
 
--- name limits:
+-- TODO: name limits:
 -- * labels are 63 octects or fewer
--- * names are 255 octets or fewer, including dots, including final dot
+-- * names are 255 octets or fewer, including dots
 instance Serialize DomainName where
     put (DomainName labels) = do
         mapM_ putLabel labels
         putWord8 0
       where
         putLabel l = do
-            let bytes = fromString l
+            let bytes = UTF8.fromString l
             putWord8 (fromIntegral (B.length bytes))
             putByteString bytes
 
@@ -362,11 +362,11 @@ instance Serialize DomainName where
         return $ DomainName labels
       where
         getLabels = do
-          len <- liftM fromIntegral getWord8
-          if len == 0
-          then return []
-          else do
-              bytes <- getBytes len
-              let label = toString bytes
-              rest <- getLabels
-              return (label : rest)
+            len <- liftM fromIntegral getWord8
+            if len == 0
+            then return []
+            else do
+                bytes <- getBytes len
+                let label = UTF8.toString bytes
+                ls <- getLabels
+                return (label : ls)
