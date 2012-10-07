@@ -35,8 +35,9 @@ instance Arbitrary DomainName where
                 then return ls
                 else buildLabels (n - 1) (label : ls)
             buildLabel = do
-                l <- choose (0, 63)
-                -- TODO: replicateM l arbitrary `suchThat` ((<= 63) . len)
+                randomLabel `suchThat` ((<= 63) . len)
+            randomLabel = do
+                l <- choose (1, 63)
                 replicateM l arbitrary
             totalLen ls = sum (map len ls) + length ls
             len = BS.length . UTF8.fromString

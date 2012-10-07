@@ -74,7 +74,7 @@ module Net.DNS ( DomainName
                , notImplemented
                , refused ) where
 
-import Control.Monad (liftM, replicateM)
+import Control.Monad (liftM, replicateM, when)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.UTF8 as UTF8
@@ -354,7 +354,9 @@ instance Serialize DomainName where
       where
         putLabel l = do
             let bytes = UTF8.fromString l
-            putWord8 (fromIntegral (B.length bytes))
+            let len = fromIntegral (B.length bytes)
+            when (len > 63) $ fail ("Domain name label exceeds 63 octets: "++ l)
+            putWord8 len
             putByteString bytes
 
     get = do
