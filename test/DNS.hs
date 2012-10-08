@@ -1,10 +1,10 @@
 module DNSTest (main) where
 
+import qualified Codec.Binary.UTF8.String as UTF8
 import Control.Monad (liftM, replicateM)
-import qualified Data.ByteString      as BS
-import qualified Data.ByteString.UTF8 as UTF8
+import qualified Data.ByteString as BS
 import Data.List (intercalate)
-import Data.Serialize (decode, encode)
+import Data.Binary (decode, encode)
 import Data.Word (Word32)
 import System.Random (Random)
 import Test.QuickCheck
@@ -12,11 +12,13 @@ import Net.DNS
 
 propSurvivesSerialization :: Message -> Bool
 propSurvivesSerialization m = check $ decode (encode m)
-    where check = either (const False) (== m)
+    where check :: Either String Message -> Bool
+          check = either (const False) (== m)
 
 propStableName :: DomainName -> Bool
 propStableName n = check $ decode (encode n)
-    where check = either (const False) (== n)
+    where check :: Either String DomainName -> Bool
+          check = either (const False) (== n)
 
 main = quickCheckWith stdArgs propSurvivesSerialization
 
@@ -40,7 +42,7 @@ instance Arbitrary DomainName where
                 l <- choose (1, 63)
                 replicateM l arbitrary
             totalLen ls = sum (map len ls) + length ls
-            len = BS.length . UTF8.fromString
+            len = length . UTF8.encode
 
 instance Arbitrary Message where
     arbitrary = do
@@ -92,8 +94,7 @@ instance Arbitrary ResourceRecord where
         rrType  <- arbitrary
         rrClass <- arbitrary
         ttl     <- arbitrary
-        let d   =  arbitrary :: Gen Word32
-        rrData  <- liftM encode d
+        rrData  <- liftM BS.pack arbitrary
         return ResourceRecord { getRRName  = name
                               , getRRType  = rrType
                               , getRRClass = rrClass
