@@ -86,8 +86,8 @@ import Data.List (foldl', intercalate, null)
 import Data.List.Split (splitOn)
 import Data.Map (empty, insert, Map)
 import qualified Data.Map as Map
-import Data.Binary (get, put, Binary)
-import Data.Binary.Get (Get, bytesRead, getBytes, getWord8, getWord16be, getWord32be, lookAhead, skip)
+import Data.Binary (decode, get, put, Binary)
+import Data.Binary.Get (Get, bytesRead, getBytes, getWord8, getWord16be, getWord32be, uncheckedLookAhead, skip)
 import Data.Binary.Put (Put, putByteString, putWord8, putWord16be, putWord32be)
 import Data.Word (Word8, Word16, Word32)
 import Foreign.Marshal.Utils (fromBool, toBool)
@@ -369,7 +369,7 @@ getDomainName = do
   where
     getLabels = do
         offset     <- lift $ liftM fromIntegral bytesRead
-        offsetMark <- lift $ lookAhead getWord16be
+        offsetMark <- lift $ uncheckedLookAhead 2
         len        <- lift $ liftM fromIntegral getWord8
         case len of
             _ | len == 0   -> return []
@@ -381,8 +381,8 @@ getDomainName = do
                   return (label : ls)
               | len >= 192 -> do
                   lift $ skip 1  -- already got the next byte in offsetMark
-                  let offset' = offsetMark - 49152
-                  ref <- State.gets $ Map.lookup (fromIntegral offset')
+                  let offset' = decode offsetMark :: Word16
+                  ref <- State.gets $ Map.lookup (fromIntegral offset' - 49152)
                   case ref of
                       Just ls -> return ls
                       Nothing -> fail ("Invalid label offset: "++ show offset')
