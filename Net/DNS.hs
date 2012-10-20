@@ -75,8 +75,8 @@ module Net.DNS ( DomainName
                , refused ) where
 
 import Control.Monad (liftM, replicateM, when)
-import Control.Monad.State (evalStateT, StateT)
-import qualified Control.Monad.State as State
+import Control.Monad.State.Strict (evalStateT, StateT)
+import qualified Control.Monad.State.Strict as State
 import Control.Monad.Trans (lift)
 import qualified Data.ByteString      as B
 import qualified Data.ByteString.Lazy as LB
@@ -86,9 +86,11 @@ import Data.List (foldl', intercalate, null)
 import Data.List.Split (splitOn)
 import Data.Map (empty, insert, Map)
 import qualified Data.Map as Map
+
 import Data.Binary (decode, get, put, Binary)
 import Data.Binary.Get (Get, bytesRead, getBytes, getWord8, getWord16be, getWord32be, uncheckedLookAhead, skip)
 import Data.Binary.Put (Put, putByteString, putWord8, putWord16be, putWord32be)
+
 import Data.Word (Word8, Word16, Word32)
 import Foreign.Marshal.Utils (fromBool, toBool)
 import Prelude hiding (null)
