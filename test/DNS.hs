@@ -4,7 +4,7 @@ import qualified Codec.Binary.UTF8.String as UTF8
 import Control.Monad (liftM, replicateM)
 import qualified Data.ByteString as BS
 import Data.List (intercalate)
-import Data.Binary (decode, encode)
+import Data.Serialize (decode, encode)
 import Data.Word (Word32)
 import System.Random (Random)
 import Test.QuickCheck
@@ -12,13 +12,17 @@ import Net.DNS
 
 propSurvivesSerialization :: Message -> Bool
 propSurvivesSerialization m = check $ decode (encode m)
-    where check :: Either String Message -> Bool
-          check = either (const False) (== m)
+      where check = either (const False) (== m)
+
+--    where check :: Either String Message -> Bool
+--          check = either (const False) (== m)
 
 propStableName :: DomainName -> Bool
 propStableName n = check $ decode (encode n)
-    where check :: Either String DomainName -> Bool
-          check = either (const False) (== n)
+    where check = either (const False) (== n)
+
+--    where check :: Either String DomainName -> Bool
+--          check = either (const False) (== n)
 
 main = quickCheckWith stdArgs propSurvivesSerialization
 

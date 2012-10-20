@@ -78,19 +78,17 @@ import Control.Monad (liftM, replicateM, when)
 import Control.Monad.State.Strict (evalStateT, StateT)
 import qualified Control.Monad.State.Strict as State
 import Control.Monad.Trans (lift)
+import Data.ByteString (ByteString)
 import qualified Data.ByteString      as B
-import qualified Data.ByteString.Lazy as LB
 import qualified Data.ByteString.UTF8 as UTF8
 import Data.Bits ((.&.), Bits, complement, shiftL, shiftR)
 import Data.List (foldl', intercalate, null)
 import Data.List.Split (splitOn)
-import Data.Map (empty, insert, Map)
+import Data.Map (insert, Map)
 import qualified Data.Map as Map
-
-import Data.Binary (decode, get, put, Binary)
-import Data.Binary.Get (Get, bytesRead, getBytes, getWord8, getWord16be, getWord32be, uncheckedLookAhead, skip)
-import Data.Binary.Put (Put, putByteString, putWord8, putWord16be, putWord32be)
-
+import Data.Serialize (decode, get, put, Serialize)
+import Data.Serialize.Get (Get, getBytes, getWord8, getWord16be, getWord32be, uncheckedLookAhead, skip)
+import Data.Serialize.Put (Put, putByteString, putWord8, putWord16be, putWord32be, Putter)
 import Data.Word (Word8, Word16, Word32)
 import Foreign.Marshal.Utils (fromBool, toBool)
 import Prelude hiding (null)
@@ -129,7 +127,7 @@ data ResourceRecord = ResourceRecord { getRRName   :: DomainName
                                      , getRRType   :: RRType
                                      , getRRClass  :: RRClass
                                      , getTTL      :: Word32
-                                     , getRRData   :: B.ByteString }
+                                     , getRRData   :: ByteString }
                       deriving (Eq, Show, Read)
 
 defaultMessage :: Message
@@ -220,7 +218,7 @@ getMessage = do
                    , getAuthorities       = authorities
                    , getAdditional        = additional }
 
-instance Binary Message where
+instance Serialize Message where
     put msg = do
         putHeader msg
         mapM_ put (getQuestions   msg)
@@ -228,7 +226,7 @@ instance Binary Message where
         mapM_ put (getAuthorities msg)
         mapM_ put (getAdditional  msg)
 
-    get = evalStateT getMessage empty
+    get = evalStateT getMessage Map.empty
 
 
 -- The header contains the following fields:
@@ -249,7 +247,7 @@ instance Binary Message where
 -- |                    ARCOUNT                    |
 -- +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
-putHeader :: Message -> Put
+putHeader :: Putter Message
 putHeader msg = do
     putWord16be (getId msg)
     putWord16be (packFlags [
@@ -305,13 +303,13 @@ getQuestion = do
                     , getQType  = t
                     , getQClass = c }
 
-instance Binary Question where
+instance Serialize Question where
     put q = do
         put         (getQName  q)
         putWord16be (fromRRType  (getQType  q))
         putWord16be (fromRRClass (getQClass q))
 
-    get = evalStateT getQuestion empty
+    get = evalStateT getQuestion Map.empty
 
 -- All RRs have the same top level format shown below:
 -- 
@@ -350,7 +348,7 @@ getResourceRecord = do
                           , getTTL     = fromIntegral ttl
                           , getRRData  = rdata }
 
-instance Binary ResourceRecord where
+instance Serialize ResourceRecord where
     put rr = do
         put           (getRRName  rr)
         putWord16be   (fromRRType  (getRRType  rr))
@@ -359,7 +357,7 @@ instance Binary ResourceRecord where
         putWord16be   (fromIntegral (B.length (getRRData rr)))
         putByteString (getRRData rr)
 
-    get = evalStateT getResourceRecord empty
+    get = evalStateT getResourceRecord Map.empty
 
 -- TODO: name limits:
 -- * labels are 63 octects or fewer
@@ -390,7 +388,7 @@ getDomainName = do
                       Nothing -> fail ("Invalid label offset: "++ show offset')
               | otherwise  -> fail ("Unknown label length octet value: "++ show len)
 
-instance Binary DomainName where
+instance Serialize DomainName where
     put (DomainName labels) = do
         -- TODO: validate total length of name
         mapM_ putLabel labels
@@ -403,7 +401,7 @@ instance Binary DomainName where
             putWord8 len
             putByteString bytes
 
-    get = evalStateT getDomainName empty
+    get = evalStateT getDomainName Map.empty
 
 getWord16 :: GetS Word16
 getWord16 = lift getWord16be
