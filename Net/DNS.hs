@@ -84,14 +84,14 @@ import qualified Data.ByteString.UTF8 as UTF8
 import Data.Bits ((.&.), Bits, complement, shiftL, shiftR)
 import Data.List (foldl', intercalate, null)
 import Data.List.Split (splitOn)
-import Data.Map (insert, Map)
+import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Serialize (decode, get, put, Serialize)
-import Data.Serialize.Get (Get, getBytes, getWord8, getWord16be, getWord32be, uncheckedLookAhead, skip)
+import Data.Serialize.Get (Get, getBytes, getWord8, getWord16be, getWord32be, lookAhead, skip)
 import Data.Serialize.Put (Put, putByteString, putWord8, putWord16be, putWord32be, Putter)
 import Data.Word (Word8, Word16, Word32)
 import Foreign.Marshal.Utils (fromBool, toBool)
-import Prelude hiding (null)
+import Prelude hiding (lookup, null)
 
 newtype DomainName = DomainName [String] deriving (Eq, Show, Read)
 
@@ -183,7 +183,38 @@ nameError      = ResponseCode 3
 notImplemented = ResponseCode 4
 refused        = ResponseCode 5
 
-type GetS a = StateT (Map Int [String]) Get a
+
+-- state Monad to track label offsets for domain name compression
+
+type GetS a = StateT (Maybe ReadState) Get a
+
+data ReadState = ReadState { getBytesRead :: Int
+                           , labelOffsets :: Map Int [String] }
+
+insert :: Integral a => a -> [String] -> Maybe ReadState -> Maybe ReadState
+insert k v = fmap insert'
+    where insert' (ReadState b o) = ReadState b (Map.insert k' v o)
+          k' = fromIntegral k
+
+lookup :: Integral a => a -> Maybe ReadState -> Maybe [String]
+lookup k = (>>= Map.lookup (fromIntegral k) . labelOffsets)
+
+readBytes :: Integral a => a -> Maybe ReadState -> Maybe ReadState
+readBytes n = fmap increment'
+    where increment' (ReadState b o) = ReadState (b + n') o
+          n' = fromIntegral n
+
+bytesRead :: Maybe ReadState -> Int
+bytesRead = maybe 0 getBytesRead
+
+emptyState :: Maybe ReadState
+emptyState = Just (ReadState 0 Map.empty)
+
+nothingState :: Maybe ReadState
+nothingState = Nothing
+
+
+-- serialization and deserialization code
 
 getMessage :: GetS Message
 getMessage = do
@@ -200,6 +231,7 @@ getMessage = do
     ancount        <- liftM fromIntegral getWord16
     nscount        <- liftM fromIntegral getWord16
     arcount        <- liftM fromIntegral getWord16
+    State.modify $ readBytes 12
     questions      <- replicateM qdcount getQuestion
     answers        <- replicateM ancount getResourceRecord
     authorities    <- replicateM nscount getResourceRecord
@@ -226,7 +258,7 @@ instance Serialize Message where
         mapM_ put (getAuthorities msg)
         mapM_ put (getAdditional  msg)
 
-    get = evalStateT getMessage Map.empty
+    get = evalStateT getMessage emptyState
 
 
 -- The header contains the following fields:
@@ -299,6 +331,7 @@ getQuestion = do
     name <- getDomainName
     t    <- liftM RRType  getWord16
     c    <- liftM RRClass getWord16
+    State.modify $ readBytes 4  -- 4 bytes for type and class
     return Question { getQName  = name
                     , getQType  = t
                     , getQClass = c }
@@ -309,7 +342,7 @@ instance Serialize Question where
         putWord16be (fromRRType  (getQType  q))
         putWord16be (fromRRClass (getQClass q))
 
-    get = evalStateT getQuestion Map.empty
+    get = evalStateT getQuestion nothingState
 
 -- All RRs have the same top level format shown below:
 -- 
@@ -342,6 +375,7 @@ getResourceRecord = do
     ttl   <- getWord32
     len   <- getWord16
     rdata <- lift $ getBytes (fromIntegral len)
+    State.modify $ readBytes (10 + len)
     return ResourceRecord { getRRName  = name
                           , getRRType  = t
                           , getRRClass = c
@@ -357,7 +391,7 @@ instance Serialize ResourceRecord where
         putWord16be   (fromIntegral (B.length (getRRData rr)))
         putByteString (getRRData rr)
 
-    get = evalStateT getResourceRecord Map.empty
+    get = evalStateT getResourceRecord nothingState
 
 -- TODO: name limits:
 -- * labels are 63 octects or fewer
@@ -368,24 +402,25 @@ getDomainName = do
     return $ DomainName labels
   where
     getLabels = do
-        offset     <- lift $ liftM fromIntegral bytesRead
-        offsetMark <- lift $ uncheckedLookAhead 2
-        len        <- lift $ liftM fromIntegral getWord8
+        len <- lift $ liftM fromIntegral $ lookAhead getWord8
         case len of
-            _ | len == 0   -> return []
+            _ | len == 0   -> lift (skip 1) >> return []
               | len <  64  -> do
+                  offset <- State.gets bytesRead
+                  lift $ skip 1
                   bytes <- lift $ getBytes len
                   let label = UTF8.toString bytes
+                  State.modify $ readBytes (1 + len)
                   ls <- getLabels
                   State.modify $ insert offset (label : ls)
                   return (label : ls)
               | len >= 192 -> do
-                  lift $ skip 1  -- already got the next byte in offsetMark
-                  let offset' = decode offsetMark :: Word16
-                  ref <- State.gets $ Map.lookup (fromIntegral offset' - 49152)
+                  referencedOffset <- liftM (\n -> n - 49152) getWord16
+                  State.modify $ readBytes 2
+                  ref <- State.gets $ lookup (referencedOffset - 49152)
                   case ref of
                       Just ls -> return ls
-                      Nothing -> fail ("Invalid label offset: "++ show offset')
+                      Nothing -> fail ("Invalid label offset: "++ show referencedOffset)
               | otherwise  -> fail ("Unknown label length octet value: "++ show len)
 
 instance Serialize DomainName where
@@ -401,7 +436,7 @@ instance Serialize DomainName where
             putWord8 len
             putByteString bytes
 
-    get = evalStateT getDomainName Map.empty
+    get = evalStateT getDomainName nothingState
 
 getWord16 :: GetS Word16
 getWord16 = lift getWord16be

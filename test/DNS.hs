@@ -14,15 +14,9 @@ propSurvivesSerialization :: Message -> Bool
 propSurvivesSerialization m = check $ decode (encode m)
       where check = either (const False) (== m)
 
---    where check :: Either String Message -> Bool
---          check = either (const False) (== m)
-
 propStableName :: DomainName -> Bool
 propStableName n = check $ decode (encode n)
     where check = either (const False) (== n)
-
---    where check :: Either String DomainName -> Bool
---          check = either (const False) (== n)
 
 main = quickCheckWith stdArgs propSurvivesSerialization
 
