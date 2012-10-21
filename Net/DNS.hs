@@ -88,7 +88,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Serialize (decode, get, put, Serialize)
 import Data.Serialize.Get (Get, getBytes, getWord8, getWord16be, getWord32be, lookAhead, skip)
-import Data.Serialize.Put (Put, putByteString, putWord8, putWord16be, putWord32be, Putter)
+import Data.Serialize.Put (Put, PutM, putByteString, putWord8, putWord16be, putWord32be, Putter)
 import Data.Word (Word8, Word16, Word32)
 import Foreign.Marshal.Utils (fromBool, toBool)
 import Prelude hiding (lookup, null)
@@ -184,7 +184,7 @@ notImplemented = ResponseCode 4
 refused        = ResponseCode 5
 
 
--- state Monad to track label offsets for domain name compression
+-- state Monad to track label offsets for decompressing domain names
 
 type GetS a = StateT (Maybe ReadState) Get a
 
@@ -212,6 +212,14 @@ emptyState = Just (ReadState 0 Map.empty)
 
 nothingState :: Maybe ReadState
 nothingState = Nothing
+
+
+-- state Monad to track label offsets for compressing domain names
+
+type PutS = StateT (Maybe ReadState) PutM ()
+
+wroteBytes   = readBytes
+bytesWritten = bytesRead
 
 
 -- serialization and deserialization code
@@ -250,15 +258,18 @@ getMessage = do
                    , getAuthorities       = authorities
                    , getAdditional        = additional }
 
-instance Serialize Message where
-    put msg = do
-        putHeader msg
-        mapM_ put (getQuestions   msg)
-        mapM_ put (getAnswers     msg)
-        mapM_ put (getAuthorities msg)
-        mapM_ put (getAdditional  msg)
+putMessage :: Message -> PutS
+putMessage msg = do
+    lift $ putHeader msg
+    State.modify $ wroteBytes 12
+    mapM_ putQuestion       (getQuestions   msg)
+    mapM_ putResourceRecord (getAnswers     msg)
+    mapM_ putResourceRecord (getAuthorities msg)
+    mapM_ putResourceRecord (getAdditional  msg)
 
-    get = evalStateT getMessage emptyState
+instance Serialize Message where
+    put msg = evalStateT (putMessage msg) emptyState
+    get     = evalStateT getMessage       emptyState
 
 
 -- The header contains the following fields:
@@ -336,13 +347,16 @@ getQuestion = do
                     , getQType  = t
                     , getQClass = c }
 
-instance Serialize Question where
-    put q = do
-        put         (getQName  q)
-        putWord16be (fromRRType  (getQType  q))
-        putWord16be (fromRRClass (getQClass q))
+putQuestion :: Question -> PutS
+putQuestion q = do
+    putDomainName (getQName  q)
+    putWord16     (fromRRType  (getQType  q))
+    putWord16     (fromRRClass (getQClass q))
+    State.modify $ wroteBytes 4
 
-    get = evalStateT getQuestion nothingState
+instance Serialize Question where
+    put q = evalStateT (putQuestion q) nothingState
+    get   = evalStateT getQuestion     nothingState
 
 -- All RRs have the same top level format shown below:
 -- 
@@ -382,16 +396,21 @@ getResourceRecord = do
                           , getTTL     = fromIntegral ttl
                           , getRRData  = rdata }
 
-instance Serialize ResourceRecord where
-    put rr = do
-        put           (getRRName  rr)
-        putWord16be   (fromRRType  (getRRType  rr))
-        putWord16be   (fromRRClass (getRRClass rr))
-        putWord32be   (getTTL   rr)
-        putWord16be   (fromIntegral (B.length (getRRData rr)))
-        putByteString (getRRData rr)
+putResourceRecord :: ResourceRecord -> PutS
+putResourceRecord rr = do
+    putDomainName (getRRName  rr)
+    putWord16     (fromRRType  (getRRType  rr))
+    putWord16     (fromRRClass (getRRClass rr))
+    putWord32     (getTTL   rr)
+    let rrData     = getRRData rr
+    let dataLength = B.length rrData
+    putWord16     (fromIntegral dataLength)
+    lift $ putByteString rrData
+    State.modify $ wroteBytes (10 + fromIntegral dataLength)
 
-    get = evalStateT getResourceRecord nothingState
+instance Serialize ResourceRecord where
+    put rr = evalStateT (putResourceRecord rr) nothingState
+    get    = evalStateT getResourceRecord      nothingState
 
 -- TODO: name limits:
 -- * labels are 63 octects or fewer
@@ -423,23 +442,35 @@ getDomainName = do
                       Nothing -> fail ("Invalid label offset: "++ show referencedOffset)
               | otherwise  -> fail ("Unknown label length octet value: "++ show len)
 
-instance Serialize DomainName where
-    put (DomainName labels) = do
-        -- TODO: validate total length of name
-        mapM_ putLabel labels
-        putWord8 0
-      where
-        putLabel l = do
-            let bytes = UTF8.fromString l
-            let len = fromIntegral (B.length bytes)
-            when (len > 63) $ fail ("Domain name label exceeds 63 octets: "++ l)
-            putWord8 len
-            putByteString bytes
+putDomainName :: DomainName -> PutS
+putDomainName (DomainName labels) = putLabels labels
+  where
+    putLabels labels@(l:ls) = do
+        offset <- State.gets bytesWritten
+        State.modify $ insert offset labels
+        let bytes = UTF8.fromString l
+        let len   = fromIntegral (B.length bytes)
+        when (len > 63) $ fail ("Domain name label exceeds 63 octets: "++ l)
+        lift $ putWord8 len
+        lift $ putByteString bytes
+        State.modify $ wroteBytes (1 + len)
+        putLabels ls
+    putLabels [] = do
+        lift $ putWord8 0
+        State.modify $ wroteBytes 1
 
-    get = evalStateT getDomainName nothingState
+instance Serialize DomainName where
+    put name = evalStateT (putDomainName name) nothingState
+    get      = evalStateT getDomainName        nothingState
 
 getWord16 :: GetS Word16
 getWord16 = lift getWord16be
 
 getWord32 :: GetS Word32
 getWord32 = lift getWord32be
+
+putWord16 :: Word16 -> PutS
+putWord16 = lift . putWord16be
+
+putWord32 :: Word32 -> PutS
+putWord32 = lift . putWord32be
