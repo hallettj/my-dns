@@ -210,8 +210,8 @@ bytesRead = maybe 0 getBytesRead
 emptyState :: Maybe ReadState
 emptyState = Just (ReadState 0 Map.empty)
 
-nothingState :: Maybe ReadState
-nothingState = Nothing
+noState :: Maybe ReadState
+noState = Nothing
 
 
 -- state Monad to track label offsets for compressing domain names
@@ -355,8 +355,8 @@ putQuestion q = do
     State.modify $ wroteBytes 4
 
 instance Serialize Question where
-    put q = evalStateT (putQuestion q) nothingState
-    get   = evalStateT getQuestion     nothingState
+    put q = evalStateT (putQuestion q) noState
+    get   = evalStateT getQuestion     noState
 
 -- All RRs have the same top level format shown below:
 -- 
@@ -409,8 +409,8 @@ putResourceRecord rr = do
     State.modify $ wroteBytes (10 + fromIntegral dataLength)
 
 instance Serialize ResourceRecord where
-    put rr = evalStateT (putResourceRecord rr) nothingState
-    get    = evalStateT getResourceRecord      nothingState
+    put rr = evalStateT (putResourceRecord rr) noState
+    get    = evalStateT getResourceRecord      noState
 
 -- TODO: name limits:
 -- * labels are 63 octects or fewer
@@ -460,8 +460,8 @@ putDomainName (DomainName labels) = putLabels labels
         State.modify $ wroteBytes 1
 
 instance Serialize DomainName where
-    put name = evalStateT (putDomainName name) nothingState
-    get      = evalStateT getDomainName        nothingState
+    put name = evalStateT (putDomainName name) noState
+    get      = evalStateT getDomainName        noState
 
 getWord16 :: GetS Word16
 getWord16 = lift getWord16be
