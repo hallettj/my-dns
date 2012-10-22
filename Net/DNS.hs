@@ -82,9 +82,9 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString      as B
 import qualified Data.ByteString.UTF8 as UTF8
 import Data.Bits ((.&.), Bits, complement, shiftL, shiftR)
-import Data.List (foldl', intercalate, null)
+import Data.List (find, foldl', intercalate, null)
 import Data.List.Split (splitOn)
-import Data.Map (Map)
+import Data.Map (assocs, Map)
 import qualified Data.Map as Map
 import Data.Serialize (decode, get, put, Serialize)
 import Data.Serialize.Get (Get, getBytes, getWord8, getWord16be, getWord32be, lookAhead, skip)
@@ -220,6 +220,13 @@ type PutS = StateT (Maybe ReadState) PutM ()
 
 wroteBytes   = readBytes
 bytesWritten = bytesRead
+
+reverseLookup :: [String] -> Maybe ReadState -> Maybe Int
+reverseLookup labels s = do
+    s' <- s
+    m  <- getMatch s'
+    return $ fst m
+  where getMatch = find ((== labels) . snd) . assocs . labelOffsets
 
 
 -- serialization and deserialization code
@@ -446,6 +453,14 @@ putDomainName :: DomainName -> PutS
 putDomainName (DomainName labels) = putLabels labels
   where
     putLabels labels@(l:ls) = do
+        prevOffset <- State.gets $ reverseLookup labels
+        case prevOffset of
+            Just o  -> putRef o
+            Nothing -> putLabels' labels
+    putLabels [] = do
+        lift $ putWord8 0
+        State.modify $ wroteBytes 1
+    putLabels' labels@(l:ls) = do
         offset <- State.gets bytesWritten
         State.modify $ insert offset labels
         let bytes = UTF8.fromString l
@@ -455,9 +470,9 @@ putDomainName (DomainName labels) = putLabels labels
         lift $ putByteString bytes
         State.modify $ wroteBytes (1 + len)
         putLabels ls
-    putLabels [] = do
-        lift $ putWord8 0
-        State.modify $ wroteBytes 1
+    putRef offset = do
+        putWord16 (fromIntegral offset + 49152)
+        State.modify $ wroteBytes 2
 
 instance Serialize DomainName where
     put name = evalStateT (putDomainName name) noState
