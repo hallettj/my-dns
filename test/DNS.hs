@@ -12,7 +12,7 @@ import Net.DNS
 
 propSurvivesSerialization :: Message -> Bool
 propSurvivesSerialization m = check $ decode (encode m)
-      where check = either (const False) (== m)
+      where check = either error (== m)
 
 propStableName :: DomainName -> Bool
 propStableName n = check $ decode (encode n)
@@ -26,7 +26,7 @@ main = quickCheckWith stdArgs propSurvivesSerialization
 -- * UDP messages are 512 octets or fewer
 instance Arbitrary DomainName where
     arbitrary = do
-        num    <- (arbitrary :: Gen Word32) `suchThat` (> 0)
+        num    <- choose (1, 128) :: Gen Int
         labels <- buildLabels num []
         return $ domainName (intercalate "." labels)
       where buildLabels n ls = do

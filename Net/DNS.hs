@@ -430,7 +430,10 @@ getDomainName = do
     getLabels = do
         len <- lift $ liftM fromIntegral $ lookAhead getWord8
         case len of
-            _ | len == 0   -> lift (skip 1) >> return []
+            _ | len == 0   -> do
+                  lift (skip 1)
+                  State.modify $ readBytes 1
+                  return []
               | len <  64  -> do
                   offset <- State.gets bytesRead
                   lift $ skip 1
@@ -443,7 +446,7 @@ getDomainName = do
               | len >= 192 -> do
                   referencedOffset <- liftM (\n -> n - 49152) getWord16
                   State.modify $ readBytes 2
-                  ref <- State.gets $ lookup (referencedOffset - 49152)
+                  ref <- State.gets $ lookup referencedOffset
                   case ref of
                       Just ls -> return ls
                       Nothing -> fail ("Invalid label offset: "++ show referencedOffset)
@@ -455,7 +458,7 @@ putDomainName (DomainName labels) = putLabels labels
     putLabels labels@(l:ls) = do
         prevOffset <- State.gets $ reverseLookup labels
         case prevOffset of
-            Just o  -> putRef o
+            Just o  -> putRef o labels
             Nothing -> putLabels' labels
     putLabels [] = do
         lift $ putWord8 0
@@ -470,9 +473,12 @@ putDomainName (DomainName labels) = putLabels labels
         lift $ putByteString bytes
         State.modify $ wroteBytes (1 + len)
         putLabels ls
-    putRef offset = do
-        putWord16 (fromIntegral offset + 49152)
-        State.modify $ wroteBytes 2
+    putRef offset labels = do
+        if offset > 2^14 - 1
+        then putLabels' labels
+        else do
+            putWord16 (fromIntegral offset + 49152)
+            State.modify $ wroteBytes 2
 
 instance Serialize DomainName where
     put name = evalStateT (putDomainName name) noState
