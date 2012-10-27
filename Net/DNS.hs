@@ -78,6 +78,7 @@ import Control.Monad (liftM, replicateM, when)
 import Control.Monad.State.Strict (evalStateT, StateT)
 import qualified Control.Monad.State.Strict as State
 import Control.Monad.Trans (lift)
+import Data.Bifunctor (first, second)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString      as B
 import qualified Data.ByteString.UTF8 as UTF8
@@ -187,28 +188,36 @@ refused        = ResponseCode 5
 -- state Monad to track label offsets for decompressing domain names
 
 type GetS a = StateT (Maybe ReadState) Get a
+type ReadState = (Int, Map Int [String])
 
-data ReadState = ReadState { getBytesRead :: Int
-                           , labelOffsets :: Map Int [String] }
+getBytesRead :: ReadState -> Int
+getBytesRead = fst
+
+labelOffsets :: ReadState -> Map Int [String]
+labelOffsets = snd
+
+--data ReadState = ReadState { getBytesRead :: Int
+--                           , labelOffsets :: Map Int [String] }
+
+--instance Bifunctor ReadState where
+--    bimap f g s = ReadState (f (getBytesRead s)) (g (getBytesRead s))
 
 insert :: Integral a => a -> [String] -> Maybe ReadState -> Maybe ReadState
-insert k v = fmap insert'
-    where insert' (ReadState b o) = ReadState b (Map.insert k' v o)
-          k' = fromIntegral k
+insert k v = fmap $ second $ Map.insert k' v
+    where k' = fromIntegral k
 
 lookup :: Integral a => a -> Maybe ReadState -> Maybe [String]
 lookup k = (>>= Map.lookup (fromIntegral k) . labelOffsets)
 
 readBytes :: Integral a => a -> Maybe ReadState -> Maybe ReadState
-readBytes n = fmap increment'
-    where increment' (ReadState b o) = ReadState (b + n') o
-          n' = fromIntegral n
+readBytes n = fmap $ first (+ n')
+    where n' = fromIntegral n
 
 bytesRead :: Maybe ReadState -> Int
 bytesRead = maybe 0 getBytesRead
 
 emptyState :: Maybe ReadState
-emptyState = Just (ReadState 0 Map.empty)
+emptyState = Just (0, Map.empty)
 
 noState :: Maybe ReadState
 noState = Nothing
