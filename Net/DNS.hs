@@ -119,8 +119,8 @@ data Message = Message { getId                :: Word16
                deriving (Eq, Show, Read)
 
 data Question = Question { getQName  :: DomainName
-                         , getQType  :: RRType
-                         , getQClass :: RRClass
+                         , getQType  :: QType
+                         , getQClass :: QClass
                          }
                 deriving (Eq, Show, Read)
 
@@ -169,6 +169,17 @@ internet = RRClass 1  -- the Internet
 csnet    = RRClass 2  -- the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
 chaos    = RRClass 3  -- the CHAOS class
 hesiod   = RRClass 4  -- Hesiod [Dyer 87]
+
+-- TODO: all RRType values are also valid QType values
+newtype QType = QType { fromQType :: Word16 } deriving (Eq, Show, Read)
+axfr     = QType 252  -- A request for a transfer of an entire zone
+mailb    = QType 253  -- A request for mailbox-related records (MB, MG or MR)
+maila    = QType 254  -- A request for mail agent RRs (Obsolete - see MX)
+splat    = QType 255  -- A request for all records
+
+-- TODO: all RRClass values are also valid QClass values
+newtype QClass = QClass { fromQClass :: Word16 } deriving (Eq, Show, Read)
+splat    = QClass 255  -- any class
 
 newtype Opcode = Opcode { fromOpcode :: Word8 } deriving (Eq, Show, Read)
 query    = Opcode 0
