@@ -127,7 +127,7 @@ data Question = Question { getQName  :: DomainName
 data ResourceRecord = ResourceRecord { getRRName   :: DomainName
                                      , getRRType   :: RRType
                                      , getRRClass  :: RRClass
-                                     , getTTL      :: Word32
+                                     , getTTL      :: Int32
                                      , getRRData   :: ByteString }
                       deriving (Eq, Show, Read)
 
@@ -402,14 +402,14 @@ getResourceRecord = do
     name  <- getDomainName
     t     <- liftM RRType  getWord16
     c     <- liftM RRClass getWord16
-    ttl   <- getWord32
+    ttl   <- lift getInt32be
     len   <- getWord16
     rdata <- lift $ getBytes (fromIntegral len)
     State.modify $ readBytes (10 + len)
     return ResourceRecord { getRRName  = name
                           , getRRType  = t
                           , getRRClass = c
-                          , getTTL     = fromIntegral ttl
+                          , getTTL     = ttl
                           , getRRData  = rdata }
 
 putResourceRecord :: ResourceRecord -> PutS
@@ -417,7 +417,7 @@ putResourceRecord rr = do
     putDomainName (getRRName  rr)
     putWord16     (fromRRType  (getRRType  rr))
     putWord16     (fromRRClass (getRRClass rr))
-    putWord32     (getTTL   rr)
+    lift $ putInt32be (getTTL   rr)
     let rrData     = getRRData rr
     let dataLength = B.length rrData
     putWord16     (fromIntegral dataLength)
