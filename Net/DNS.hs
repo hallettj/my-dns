@@ -128,7 +128,7 @@ data ResourceRecord = ResourceRecord { getRRName   :: DomainName
                                      , getRRType   :: RRType
                                      , getRRClass  :: RRClass
                                      , getTTL      :: Int32
-                                     , getRRData   :: ByteString }
+                                     , getRData    :: RData }
                       deriving (Eq, Show, Read)
 
 defaultMessage :: Message
@@ -195,6 +195,47 @@ nameError      = ResponseCode 3
 notImplemented = ResponseCode 4
 refused        = ResponseCode 5
 
+
+-- RDATA
+
+-- The four most common RData types - NS, SOA, CNAME, and PTR - may contain compressed domain names
+data RData = CNAME DomainName
+           | HINFO CPU OS
+           | MB MADNAME             -- experimental
+           | MD MADNAME             -- obsolete
+           | MF MADNAME             -- obsolete
+           | MG MGMNAME             -- experimental
+           | MINFO RMAILBX EMAILBX  -- experimental
+           | MR NEWNAME             -- experimental
+           | MX Word16 DomainName
+           | NULL ByteString        -- experimental
+           | NS DomainName
+           | PTR DomainName
+           | SOA MNAME RNAME SERIAL REFRESH RETRY EXPIRE MINIMUM
+           | TXT String
+           | A Address  -- TODO: is there an existing Haskell type for 32-bit IP addresses?
+           | WKS Address Protocol [Port]
+           | Other ByteString       -- to allow formats that are not described here
+           deriving (Eq, Show, Read)
+
+-- See RFC-1010 for more information about these two types.
+type CPU = String
+type OS = String
+
+type MADNAME = DomainName
+type MGMName = DomainName
+type RMAILBX = DomainName
+type EMAILBX = DomainName
+type NEWNAME = DomainName
+
+-- SOA field types
+type MNAME   = DomainName
+type RNAME   = DomainName
+type SERIAL  = Word32
+type REFRESH = Int32
+type RETRY   = Int32
+type EXPIRE  = Int32
+type MINIMUM = Word32
 
 -- state Monad to track label offsets for decompressing domain names
 
@@ -438,6 +479,46 @@ putResourceRecord rr = do
 instance Serialize ResourceRecord where
     put rr = evalStateT (putResourceRecord rr) noState
     get    = evalStateT getResourceRecord      noState
+
+-- The following RR definitions are expected to occur, at least
+-- potentially, in all classes.  In particular, NS, SOA, CNAME, and PTR
+-- will be used in all classes, and have the same format in all classes.
+-- Because their RDATA format is known, all domain names in the RDATA
+-- section of these RRs may be compressed.
+--
+-- <domain-name> is a domain name represented as a series of labels, and
+-- terminated by a label with zero length.  <character-string> is a single
+-- length octet followed by that number of characters.  <character-string>
+-- is treated as binary information, and can be up to 256 characters in
+-- length (including the length octet).
+putRData :: RData -> PutS
+putRData (CNAME name)   = putDomainName name
+putRData (HINFO cpu os) = lift (put cpu) >> lift (put os)
+putRData (MB name)      = putUncompressedName name
+putRData (MD name)      = putUncompressedName name
+putRData (MF name)      = putUncompressedName name
+putRData (MG name)      = putUncompressedName name
+putRData (MINFO rmailbx emailbx) = do
+    putUcompressedName rmailbx
+    putUNcompressedName emailbx
+putRData (MR name)      = putUncompressedName name
+putRData (MX pref exch) = putWord16 pref >> putDomainName exch
+putRData (NULL bs)      = lift $ put bs
+putRData (NS name)      = putDomainName name
+putRData (PTR name)     = putDomainName name
+putRData (SOA mname rname serial refresh retry expire minimum) = do
+    putDomainName mname
+    putDomainName rname
+    putWord32     serial
+    lift $ putInt32be refresh
+    lift $ putInt32be
+putRData (TXT String
+putRData (A Address  -- TODO: is there an existing Haskell type for 32-bit IP addresses?
+putRData (WKS Address Protocol [Port]
+putRData (Other ByteString       -- to allow formats that are not described here
+
+-- TODO: character-strings are not Strings!
+-- TODO: need byte-offset bookkeeping for RData serialization
 
 -- TODO: name limits:
 -- * labels are 63 octects or fewer
